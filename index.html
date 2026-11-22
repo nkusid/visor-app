@@ -184,10 +184,21 @@ mobilenet.load({version:2, alpha:1.0}).then(function(m){ net=m; modelReady=true;
 var work=document.getElementById("work");
 var wctx=work.getContext("2d",{willReadFrequently:true});
 
+// MARGE : chaque case regarde un peu plus large que sa taille d'origine (20% de plus
+// de chaque cote, limite aux bords de l'image), pour eviter que l'objet soit coupe
+// pile sur la limite d'une case.
+var MARGE = 0.20;
+function elargir(rx, ry, rw, rh){
+  var mx = rw*MARGE, my = rh*MARGE;
+  var x0 = Math.max(0, rx-mx), y0 = Math.max(0, ry-my);
+  var x1 = Math.min(1, rx+rw+mx), y1 = Math.min(1, ry+rh+my);
+  return {x:x0, y:y0, w:x1-x0, h:y1-y0};
+}
 function cropToEmbedding(videoEl, rx, ry, rw, rh){
   var vw=videoEl.videoWidth, vh=videoEl.videoHeight;
   if(!vw||!vh) return null;
-  wctx.drawImage(videoEl, rx*vw, ry*vh, rw*vw, rh*vh, 0, 0, 224, 224);
+  var r = elargir(rx, ry, rw, rh);
+  wctx.drawImage(videoEl, r.x*vw, r.y*vh, r.w*vw, r.h*vh, 0, 0, 224, 224);
   var t = net.infer(work, true);         // true = renvoie l'empreinte (embedding), pas juste une categorie
   var arr = t.dataSync();
   t.dispose();
@@ -277,10 +288,16 @@ function layoutZones(){
 window.addEventListener("resize",layoutZones);
 
 var liveLoopId=null;
+// Lissage (comme sur l'ESP32) : il faut retrouver la MEME case plusieurs cycles de
+// suite avant de changer de son, pour eviter que ca saute d'une case a l'autre.
+var CONFIRMATIONS = 2;          // nb de cycles identiques necessaires (2 x CYCLE_MS)
+var zoneActive = null, zonePrecedente = null, compteurConfirm = 0;
+
 function startLive(){
   layoutZones();
   var v=document.getElementById("vLive");
   if(!streamLive){ openCam(v).then(function(s){streamLive=s;}).catch(function(e){status("Caméra indisponible : "+e.message);}); }
+  zoneActive=null; zonePrecedente=null; compteurConfirm=0;
   if(liveLoopId) return;
   liveLoopId=setInterval(liveTick, CYCLE_MS);
 }
@@ -304,13 +321,30 @@ function liveTick(){
   }
   Object.keys(ZONES).forEach(function(z){ evalZone(z, ZONES[z]); });
   evalZone("whole", ZONE_WHOLE);   // 10e candidat : l'image entiere ("objet reconnu")
-  Object.keys(ZONES).forEach(function(z){document.getElementById("z-"+z).classList.toggle("active", z===bestZone && bestScore*100>=cfg.thresh);});
-  if(bestZone && bestScore*100>=cfg.thresh){
-    document.getElementById("liveInfo").textContent="Objet détecté : "+bestZone+"  (confiance "+Math.round(bestScore*100)+"%)";
-    playFreqIndex(cfg[bestZone]);
+
+  var candidat = (bestZone && bestScore*100>=cfg.thresh) ? bestZone : null;
+
+  if(candidat){
+    if(candidat===zoneActive){
+      compteurConfirm=0; // la case deja active est reconfirmee : rien a changer
+    } else {
+      if(candidat===zonePrecedente) compteurConfirm++;
+      else { zonePrecedente=candidat; compteurConfirm=1; }
+      if(compteurConfirm>=CONFIRMATIONS){
+        zoneActive=candidat;
+        playFreqIndex(cfg[zoneActive]);
+      }
+    }
+  } else {
+    zonePrecedente=null; compteurConfirm=0;
+    if(zoneActive){ zoneActive=null; haltTone(); }
+  }
+
+  Object.keys(ZONES).forEach(function(z){document.getElementById("z-"+z).classList.toggle("active", z===zoneActive);});
+  if(zoneActive){
+    document.getElementById("liveInfo").textContent="Objet détecté : "+zoneActive+"  (confiance "+Math.round(bestScore*100)+"%)";
   } else {
     document.getElementById("liveInfo").textContent="Rien de reconnu (meilleure confiance "+Math.round(Math.max(bestScore,0)*100)+"%)";
-    haltTone();
   }
 }
 
