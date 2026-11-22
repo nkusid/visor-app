@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#14171d">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Visor</title>
+<style>
+:root{--bg:#f2f3f5;--tile:#ffffff;--text:#1d2129;--line:#c9cdd4;--on:#2f5fd0;--ontext:#ffffff;--bad:#d0392f;--good:#2f9e52}
+@media (prefers-color-scheme:dark){:root{--bg:#14171d;--tile:#222733;--text:#e8eaee;--line:#363d4d;--on:#4a7bf0;--ontext:#ffffff}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;overscroll-behavior:none}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top,0) 10px env(safe-area-inset-bottom,0)}
+h1{margin:10px 0 6px;text-align:center;font-size:20px;letter-spacing:.3em;font-weight:700}
+nav{display:flex;gap:6px;margin-bottom:8px}
+nav button{flex:1;padding:10px 4px;border-radius:10px;border:1px solid var(--line);background:var(--tile);color:var(--text);font-size:14px}
+nav button.sel{background:var(--on);color:var(--ontext);border-color:var(--on)}
+section{display:none;flex:1;min-height:0;flex-direction:column;gap:8px;overflow:auto;padding-bottom:16px}
+section.show{display:flex}
+#st{min-height:18px;text-align:center;font-size:13px;opacity:.75}
+.camwrap{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:14px;overflow:hidden;flex-shrink:0}
+video,canvas.disp{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.zone{position:absolute;border:2px dashed rgba(255,255,255,.35);border-radius:6px;pointer-events:none}
+.zone.active{border-color:var(--good);border-style:solid}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button.g{font-size:15px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--tile);color:var(--text);font-weight:600}
+button.g.primary{background:var(--on);color:var(--ontext);border-color:var(--on)}
+button.g.danger{color:var(--bad)}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px}
+.thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.thumb{position:relative}
+.thumb button{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:none;background:var(--bad);color:#fff;font-size:13px;line-height:1}
+label.f{font-size:13px;opacity:.8;display:block;margin:6px 0 2px}
+select,input[type=range]{width:100%;font-size:15px;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--tile);color:var(--text)}
+.card{background:var(--tile);border:1px solid var(--line);border-radius:12px;padding:10px}
+small.hint{opacity:.65;font-size:12px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<h1>VISOR</h1>
+<div id="st"></div>
+<nav>
+  <button data-s="train" class="sel">Apprentissage</button>
+  <button data-s="live">Surveillance</button>
+  <button data-s="settings">Réglages</button>
+</nav>
+
+<section id="s-train" class="show">
+  <div class="camwrap"><video id="vTrain" autoplay playsinline muted></video></div>
+  <div class="row">
+    <button class="g primary" id="capture">📷 Capturer</button>
+    <button class="g" id="import">Importer des photos</button>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  </div>
+  <div class="card">
+    <b id="countLbl">0 exemple(s) enregistré(s)</b>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+  <button class="g danger" id="clearAll">Tout effacer</button>
+  <small class="hint">Prends ou importe 8 à 15 photos de l'objet, sous plusieurs angles, couleurs ou éclairages si possible : plus il y a d'exemples variés, mieux l'appli reconnaît l'objet dans des conditions différentes.</small>
+</section>
+
+<section id="s-live">
+  <div class="camwrap" id="camwrapLive">
+    <video id="vLive" autoplay playsinline muted></video>
+    <div class="zone" id="z-topleft"></div>
+    <div class="zone" id="z-top"></div>
+    <div class="zone" id="z-topright"></div>
+    <div class="zone" id="z-left"></div>
+    <div class="zone" id="z-center"></div>
+    <div class="zone" id="z-right"></div>
+    <div class="zone" id="z-bottomleft"></div>
+    <div class="zone" id="z-bottom"></div>
+    <div class="zone" id="z-bottomright"></div>
+  </div>
+  <div class="card" id="liveInfo">En attente…</div>
+</section>
+
+<section id="s-settings">
+  <div class="card">
+    <label class="f">Objet reconnu (image entière, par ex. tout près)</label>
+    <select id="z-wholeSel"></select>
+    <label class="f">Centre</label>
+    <select id="z-centerSel"></select>
+    <label class="f">Haut</label>
+    <select id="z-topSel"></select>
+    <label class="f">Bas</label>
+    <select id="z-bottomSel"></select>
+    <label class="f">Gauche</label>
+    <select id="z-leftSel"></select>
+    <label class="f">Droite</label>
+    <select id="z-rightSel"></select>
+    <label class="f">Haut-gauche</label>
+    <select id="z-topleftSel"></select>
+    <label class="f">Haut-droite</label>
+    <select id="z-toprightSel"></select>
+    <label class="f">Bas-gauche</label>
+    <select id="z-bottomleftSel"></select>
+    <label class="f">Bas-droite</label>
+    <select id="z-bottomrightSel"></select>
+  </div>
+  <div class="card">
+    <label class="f">Sensibilité de reconnaissance</label>
+    <input type="range" id="thresh" min="50" max="95" value="78">
+    <small class="hint">Plus bas : reconnaît plus large mais peut se tromper davantage. Plus haut : plus strict, peut parfois ne rien reconnaître.</small>
+  </div>
+</section>
+
+<canvas id="work" width="224" height="224" hidden></canvas>
+
+<!-- Modeles charges une seule fois en ligne ; ensuite mis en cache par le fichier sw.js pour un usage hors connexion. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
+<script>
+(function(){
+"use strict";
+var NAMES=["Right","Left","Front","Behind","Elevate","Emergency","Hover","Descent","Flight approval","X"];
+var FREQ=[400,480,540,600,1700,1850,2000,2150,2300,2450];
+var BURST=0.2, PERIOD=0.3, VOL=0.7, RAMP=0.01, LOOKAHEAD=0.15, PUMP_MS=40, STOP_RAMP=0.008;
+
+var DB_KEY="visor_examples_v1", CFG_KEY="visor_cfg_v1";
+var CYCLE_MS=600;   // intervalle entre deux analyses d'image (ajustable)
+
+// ---------- Generateur de bips (meme principe qu'ATLAS) ----------
+var ctx=null, cur=null, timer=null, curZone=null;
+function audio(){ if(!ctx){var AC=window.AudioContext||window.webkitAudioContext; ctx=new AC();} if(ctx.state==="suspended") ctx.resume(); return ctx; }
+function pump(){ if(!cur) return; var g=cur.g.gain, now=ctx.currentTime;
+  while(cur.next<now+LOOKAHEAD){ var t=cur.next; g.setValueAtTime(0,t); g.linearRampToValueAtTime(VOL,t+RAMP); g.setValueAtTime(VOL,t+BURST-RAMP); g.linearRampToValueAtTime(0,t+BURST); cur.next+=PERIOD; } }
+function haltTone(){ if(timer){clearInterval(timer);timer=null;}
+  if(cur){ var now=ctx.currentTime,g=cur.g.gain,v=g.value;
+    try{ g.cancelScheduledValues(now); g.setValueAtTime(v,now); g.linearRampToValueAtTime(0,now+STOP_RAMP); cur.o.stop(now+STOP_RAMP+0.02); }catch(e){}
+    cur=null; } curZone=null; }
+function playFreqIndex(i){ if(curZone===i) return; haltTone();
+  var c=audio(); var o=c.createOscillator(), g=c.createGain();
+  o.type="sine"; o.frequency.value=FREQ[i]; g.gain.value=0; o.connect(g); g.connect(c.destination); o.start();
+  cur={o:o,g:g,next:c.currentTime+0.02}; curZone=i; pump(); timer=setInterval(pump,PUMP_MS); }
+
+// ---------- Config (zone -> indice de frequence choisi dans les reglages) ----------
+var cfg = JSON.parse(localStorage.getItem(CFG_KEY) || "null") || {
+  whole:9, center:2, top:4, bottom:7, left:1, right:0,
+  topleft:5, topright:6, bottomleft:8, bottomright:3, thresh:78
+};
+function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+
+["whole","center","top","bottom","left","right","topleft","topright","bottomleft","bottomright"].forEach(function(z){
+  var sel=document.getElementById("z-"+z+"Sel");
+  NAMES.forEach(function(n,i){ var o=document.createElement("option"); o.value=i; o.textContent=n; sel.appendChild(o); });
+  sel.value=cfg[z]; sel.addEventListener("change",function(){ cfg[z]=parseInt(sel.value,10); saveCfg(); });
+});
+document.getElementById("thresh").value=cfg.thresh;
+document.getElementById("thresh").addEventListener("input",function(e){ cfg.thresh=parseInt(e.target.value,10); saveCfg(); });
+
+// ---------- Navigation ----------
+document.querySelectorAll("nav button").forEach(function(b){
+  b.addEventListener("click",function(){
+    document.querySelectorAll("nav button").forEach(function(x){x.classList.remove("sel");});
+    document.querySelectorAll("section").forEach(function(x){x.classList.remove("show");});
+    b.classList.add("sel"); document.getElementById("s-"+b.dataset.s).classList.add("show");
+    if(b.dataset.s!=="live"){ stopLive(); haltTone(); }
+    if(b.dataset.s==="live") startLive();
+  });
+});
+
+// ---------- Camera ----------
+var streamTrain=null, streamLive=null;
+function openCam(videoEl){
+  return navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}, audio:false})
+    .then(function(s){ videoEl.srcObject=s; return s; });
+}
+document.getElementById("s-train").addEventListener("transitionend",function(){});
+openCam(document.getElementById("vTrain")).then(function(s){streamTrain=s;}).catch(function(e){ status("Caméra indisponible : "+e.message); });
+
+function status(t){ document.getElementById("st").textContent=t||""; }
+
+// ---------- Modele (charge une fois, reste en memoire) ----------
+var net=null, modelReady=false;
+status("Chargement du modèle…");
+mobilenet.load({version:2, alpha:1.0}).then(function(m){ net=m; modelReady=true; status(""); })
+  .catch(function(e){ status("Modèle indisponible hors connexion tant qu'il n'a pas été chargé une première fois en ligne."); });
+
+var work=document.getElementById("work");
+var wctx=work.getContext("2d",{willReadFrequently:true});
+
+function cropToEmbedding(videoEl, rx, ry, rw, rh){
+  var vw=videoEl.videoWidth, vh=videoEl.videoHeight;
+  if(!vw||!vh) return null;
+  wctx.drawImage(videoEl, rx*vw, ry*vh, rw*vw, rh*vh, 0, 0, 224, 224);
+  var t = net.infer(work, true);         // true = renvoie l'empreinte (embedding), pas juste une categorie
+  var arr = t.dataSync();
+  t.dispose();
+  return Array.from(arr);
+}
+
+function cosine(a,b){
+  var dot=0,na=0,nb=0;
+  for(var i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+  return dot/(Math.sqrt(na)*Math.sqrt(nb)+1e-9);
+}
+
+// ---------- Base d'exemples (Apprentissage) ----------
+var examples = JSON.parse(localStorage.getItem(DB_KEY) || "[]"); // [{emb:[...], thumb:"data:..."}]
+function renderThumbs(){
+  document.getElementById("countLbl").textContent = examples.length+" exemple(s) enregistré(s)";
+  var box=document.getElementById("thumbs"); box.innerHTML="";
+  examples.forEach(function(ex,i){
+    var d=document.createElement("div"); d.className="thumb";
+    var img=document.createElement("img"); img.src=ex.thumb;
+    var del=document.createElement("button"); del.textContent="×";
+    del.addEventListener("click",function(){ examples.splice(i,1); persist(); renderThumbs(); });
+    d.appendChild(img); d.appendChild(del); box.appendChild(d);
+  });
+}
+function persist(){ localStorage.setItem(DB_KEY, JSON.stringify(examples)); }
+renderThumbs();
+
+function addExampleFromCanvas(){
+  if(!modelReady){ status("Le modèle n'est pas encore prêt."); return; }
+  var vw=work.width, vh=work.height;
+  var t=net.infer(work,true); var arr=Array.from(t.dataSync()); t.dispose();
+  var thumb=work.toDataURL("image/jpeg",0.6);
+  examples.push({emb:arr, thumb:thumb}); persist(); renderThumbs();
+}
+
+document.getElementById("capture").addEventListener("click",function(){
+  var v=document.getElementById("vTrain");
+  if(!v.videoWidth){ status("Caméra pas encore prête."); return; }
+  wctx.drawImage(v,0,0,v.videoWidth,v.videoHeight,0,0,224,224);
+  addExampleFromCanvas();
+});
+
+document.getElementById("import").addEventListener("click",function(){ document.getElementById("fileInput").click(); });
+document.getElementById("fileInput").addEventListener("change",function(e){
+  var files=Array.from(e.target.files||[]);
+  if(!files.length) return;
+  if(!modelReady){ status("Le modèle n'est pas encore prêt, réessaie dans un instant."); return; }
+  files.forEach(function(f){
+    var img=new Image();
+    img.onload=function(){ wctx.drawImage(img,0,0,img.width,img.height,0,0,224,224); addExampleFromCanvas(); };
+    img.src=URL.createObjectURL(f);
+  });
+  e.target.value="";
+});
+
+document.getElementById("clearAll").addEventListener("click",function(){
+  if(confirm("Effacer tous les exemples enregistrés ?")){ examples=[]; persist(); renderThumbs(); }
+});
+
+// ---------- Surveillance (detection en direct) ----------
+// Grille de 9 cases EGALES et SANS CHEVAUCHEMENT (chaque point de l'image
+// appartient a une seule case) + "whole" = l'image entiere, comparee a part,
+// pour le 10e son ("objet reconnu"). Comme une seule case peut gagner la
+// comparaison a chaque cycle, un seul son peut jouer a la fois.
+var ZONES={
+  topleft:    {x:0/3, y:0/3, w:1/3, h:1/3},
+  top:        {x:1/3, y:0/3, w:1/3, h:1/3},
+  topright:   {x:2/3, y:0/3, w:1/3, h:1/3},
+  left:       {x:0/3, y:1/3, w:1/3, h:1/3},
+  center:     {x:1/3, y:1/3, w:1/3, h:1/3},
+  right:      {x:2/3, y:1/3, w:1/3, h:1/3},
+  bottomleft: {x:0/3, y:2/3, w:1/3, h:1/3},
+  bottom:     {x:1/3, y:2/3, w:1/3, h:1/3},
+  bottomright:{x:2/3, y:2/3, w:1/3, h:1/3}
+};
+var ZONE_WHOLE={x:0,y:0,w:1,h:1};
+function layoutZones(){
+  var wrap=document.getElementById("camwrapLive");
+  var W=wrap.clientWidth, H=wrap.clientHeight;
+  Object.keys(ZONES).forEach(function(z){
+    var r=ZONES[z], el=document.getElementById("z-"+z);
+    el.style.left=(r.x*W)+"px"; el.style.top=(r.y*H)+"px";
+    el.style.width=(r.w*W)+"px"; el.style.height=(r.h*H)+"px";
+  });
+}
+window.addEventListener("resize",layoutZones);
+
+var liveLoopId=null;
+function startLive(){
+  layoutZones();
+  var v=document.getElementById("vLive");
+  if(!streamLive){ openCam(v).then(function(s){streamLive=s;}).catch(function(e){status("Caméra indisponible : "+e.message);}); }
+  if(liveLoopId) return;
+  liveLoopId=setInterval(liveTick, CYCLE_MS);
+}
+function stopLive(){ if(liveLoopId){clearInterval(liveLoopId); liveLoopId=null;}
+  Object.keys(ZONES).forEach(function(z){document.getElementById("z-"+z).classList.remove("active");});
+  document.getElementById("liveInfo").textContent="";
+}
+function liveTick(){
+  var v=document.getElementById("vLive");
+  if(!modelReady || !v.videoWidth || examples.length===0){
+    document.getElementById("liveInfo").textContent = examples.length===0 ? "Ajoute d'abord des exemples dans Apprentissage." : "Chargement…";
+    return;
+  }
+  var bestZone=null, bestScore=-1;
+  function evalZone(name, r){
+    var emb=cropToEmbedding(v, r.x, r.y, r.w, r.h);
+    if(!emb) return;
+    var score=-1;
+    examples.forEach(function(ex){ var s=cosine(emb, ex.emb); if(s>score) score=s; });
+    if(score>bestScore){ bestScore=score; bestZone=name; }
+  }
+  Object.keys(ZONES).forEach(function(z){ evalZone(z, ZONES[z]); });
+  evalZone("whole", ZONE_WHOLE);   // 10e candidat : l'image entiere ("objet reconnu")
+  Object.keys(ZONES).forEach(function(z){document.getElementById("z-"+z).classList.toggle("active", z===bestZone && bestScore*100>=cfg.thresh);});
+  if(bestZone && bestScore*100>=cfg.thresh){
+    document.getElementById("liveInfo").textContent="Objet détecté : "+bestZone+"  (confiance "+Math.round(bestScore*100)+"%)";
+    playFreqIndex(cfg[bestZone]);
+  } else {
+    document.getElementById("liveInfo").textContent="Rien de reconnu (meilleure confiance "+Math.round(Math.max(bestScore,0)*100)+"%)";
+    haltTone();
+  }
+}
+
+document.addEventListener("visibilitychange",function(){ if(document.hidden){ haltTone(); } });
+window.addEventListener("pagehide",function(){ haltTone(); });
+
+if("serviceWorker" in navigator && (location.protocol==="https:"||location.hostname==="localhost")){
+  navigator.serviceWorker.register("sw.js").catch(function(){});
+}
+})();
+</script>
+</body>
+</html>
