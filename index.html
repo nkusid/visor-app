@@ -230,10 +230,14 @@ function cropToEmbedding(videoEl, rx, ry, rw, rh){
   // en coordonnees reelles sur l'image brute de la camera
   var sx = vis.x0 + r.x*vis.w, sy = vis.y0 + r.y*vis.h, sw = r.w*vis.w, sh = r.h*vis.h;
   wctx.drawImage(videoEl, sx*vw, sy*vh, sw*vw, sh*vh, 0, 0, 224, 224);
-  var t = net.infer(work, true);         // true = renvoie l'empreinte (embedding), pas juste une categorie
-  var arr = t.dataSync();
-  t.dispose();
-  return Array.from(arr);
+  // tf.tidy() : vide systematiquement toute la memoire graphique utilisee pour ce
+  // calcul des qu'il est termine, pour que rien ne s'accumule au fil du temps.
+  var arr;
+  tf.tidy(function(){
+    var t = net.infer(work, true);   // true = renvoie l'empreinte (embedding), pas juste une categorie
+    arr = Array.from(t.dataSync());
+  });
+  return arr;
 }
 
 function cosine(a,b){
@@ -318,23 +322,34 @@ function layoutZones(){
 }
 window.addEventListener("resize",layoutZones);
 
-var liveLoopId=null;
 // Lissage (comme sur l'ESP32) : il faut retrouver la MEME case plusieurs cycles de
 // suite avant de changer de son, pour eviter que ca saute d'une case a l'autre.
-var CONFIRMATIONS = 2;          // nb de cycles identiques necessaires (2 x CYCLE_MS)
+var CONFIRMATIONS = 2;          // nb de cycles identiques necessaires
 var zoneActive = null, zonePrecedente = null, compteurConfirm = 0;
 
+// IMPORTANT : on ne relance jamais une analyse avant que la precedente soit
+// terminee (pas de minuterie fixe). Si le telephone est lent, le rythme ralentit
+// proprement tout seul, au lieu de s'empiler et de devenir chaotique.
+var liveActive=false, liveTimer=null;
 function startLive(){
   layoutZones();
   var v=document.getElementById("vLive");
   if(!streamLive){ openCam(v).then(function(s){streamLive=s;}).catch(function(e){status("Caméra indisponible : "+e.message);}); }
   zoneActive=null; zonePrecedente=null; compteurConfirm=0;
-  if(liveLoopId) return;
-  liveLoopId=setInterval(liveTick, CYCLE_MS);
+  if(liveActive) return;
+  liveActive=true;
+  liveLoop();
 }
-function stopLive(){ if(liveLoopId){clearInterval(liveLoopId); liveLoopId=null;}
+function stopLive(){
+  liveActive=false;
+  if(liveTimer){ clearTimeout(liveTimer); liveTimer=null; }
   Object.keys(ZONES).forEach(function(z){document.getElementById("z-"+z).classList.remove("active");});
   document.getElementById("liveInfo").textContent="";
+}
+function liveLoop(){
+  if(!liveActive) return;
+  liveTick();
+  liveTimer=setTimeout(liveLoop, CYCLE_MS);   // la prochaine analyse n'est programmee qu'apres la fin de celle-ci
 }
 function liveTick(){
   var v=document.getElementById("vLive");
