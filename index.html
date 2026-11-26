@@ -178,8 +178,17 @@ function status(t){ document.getElementById("st").textContent=t||""; }
 // ---------- Modele (charge une fois, reste en memoire) ----------
 var net=null, modelReady=false;
 status("Chargement du modèle…");
-mobilenet.load({version:2, alpha:1.0}).then(function(m){ net=m; modelReady=true; status(""); })
-  .catch(function(e){ status("Modèle indisponible hors connexion tant qu'il n'a pas été chargé une première fois en ligne."); });
+// Version allegee (alpha 0.25) : beaucoup plus rapide sur telephone que la version
+// precedente (alpha 1.0), avec une precision suffisante pour ce genre de tache.
+tf.ready().then(function(){
+  return mobilenet.load({version:1, alpha:0.25});
+}).then(function(m){
+  net=m; modelReady=true;
+  var backend = tf.getBackend();
+  if(backend!=="webgl"){
+    status("Attention : accélération graphique indisponible (mode \""+backend+"\"), ce sera lent sur ce téléphone.");
+  } else { status(""); }
+}).catch(function(e){ status("Modèle indisponible hors connexion tant qu'il n'a pas été chargé une première fois en ligne."); });
 
 var work=document.getElementById("work");
 var wctx=work.getContext("2d",{willReadFrequently:true});
@@ -194,11 +203,33 @@ function elargir(rx, ry, rw, rh){
   var x1 = Math.min(1, rx+rw+mx), y1 = Math.min(1, ry+rh+my);
   return {x:x0, y:y0, w:x1-x0, h:y1-y0};
 }
+// Le navigateur recadre discretement l'image de la camera pour remplir le cadre
+// affiche a l'ecran (le cadre est force en 4:3 par le CSS, mais la camera ne filme
+// pas forcement dans ce format). Cette fonction calcule QUELLE PARTIE de l'image
+// brute de la camera est reellement visible a l'ecran, pour que les 10 cases
+// correspondent exactement a ce que l'utilisateur voit, et non a l'image brute.
+function portionVisible(vw, vh){
+  var formatCadre = 4/3;   // doit rester identique a "aspect-ratio: 4/3" dans le CSS (.camwrap)
+  var formatVideo = vw/vh;
+  if (formatVideo > formatCadre){
+    // la camera est plus "large" que le cadre : les cotes gauche/droite sont coupes
+    var largeurVisible = vh*formatCadre;
+    return { x0:(vw-largeurVisible)/2/vw, y0:0, w:largeurVisible/vw, h:1 };
+  } else {
+    // la camera est plus "haute" que le cadre : le haut/bas sont coupes
+    var hauteurVisible = vw/formatCadre;
+    return { x0:0, y0:(vh-hauteurVisible)/2/vh, w:1, h:hauteurVisible/vh };
+  }
+}
 function cropToEmbedding(videoEl, rx, ry, rw, rh){
   var vw=videoEl.videoWidth, vh=videoEl.videoHeight;
   if(!vw||!vh) return null;
+  var vis = portionVisible(vw, vh);
   var r = elargir(rx, ry, rw, rh);
-  wctx.drawImage(videoEl, r.x*vw, r.y*vh, r.w*vw, r.h*vh, 0, 0, 224, 224);
+  // on convertit la case (definie par rapport a l'image VISIBLE a l'ecran)
+  // en coordonnees reelles sur l'image brute de la camera
+  var sx = vis.x0 + r.x*vis.w, sy = vis.y0 + r.y*vis.h, sw = r.w*vis.w, sh = r.h*vis.h;
+  wctx.drawImage(videoEl, sx*vw, sy*vh, sw*vw, sh*vh, 0, 0, 224, 224);
   var t = net.infer(work, true);         // true = renvoie l'empreinte (embedding), pas juste une categorie
   var arr = t.dataSync();
   t.dispose();
